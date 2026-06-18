@@ -16,9 +16,7 @@ import { db, upsertMetricRecords, upsertRestaurants, addUploadRecord } from './d
 
 // The CSV files placed in /public during build
 const SEED_CSV_FILES = [
-  '/seed-data-1.csv',
-  '/seed-data-2.csv',
-  '/seed-data-3.csv',
+  '/seed-data.csv',
 ];
 
 /**
