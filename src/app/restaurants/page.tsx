@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAdminSession } from '@/hooks/useAdminSession';
 import DashboardShell from '@/components/layout/DashboardShell';
 import Header from '@/components/layout/Header';
-import { Search, MapPin, TrendingUp, ChevronRight } from 'lucide-react';
+import { Search, MapPin, TrendingUp, ChevronRight, Upload } from 'lucide-react';
 import { getAllRestaurants, getMetricRecords, hasData } from '@/lib/db/queries';
 import { computeSummary } from '@/lib/metrics/aggregation';
 import { formatMetricValue } from '@/lib/utils/format';
@@ -13,6 +14,7 @@ import Link from 'next/link';
 
 export default function RestaurantsPage() {
   const router = useRouter();
+  const adminSecret = useAdminSession();
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [records, setRecords] = useState<MetricRecord[]>([]);
   const [search, setSearch] = useState('');
@@ -165,7 +167,16 @@ export default function RestaurantsPage() {
         <div className="text-center py-16">
           <p style={{ color: 'var(--text-muted)' }}>
             {restaurants.length === 0 ? (
-              <>No data uploaded yet. <Link href="/upload" className="underline" style={{ color: 'var(--accent-primary)' }}>Upload CSV</Link></>
+              <>
+                  No data available yet.{' '}
+                  <button
+                    onClick={() => router.push('/admin')}
+                    className="underline"
+                    style={{ color: 'var(--accent-primary)' }}
+                  >
+                    {adminSecret ? 'Go to Admin Panel' : 'Admin Login'}
+                  </button>
+                </>
             ) : (
               'No restaurants match your search.'
             )}

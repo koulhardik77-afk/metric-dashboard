@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAdminSession } from '@/hooks/useAdminSession';
 import DashboardShell from '@/components/layout/DashboardShell';
 import Header from '@/components/layout/Header';
 import KpiCard from '@/components/cards/KpiCard';
@@ -46,6 +47,12 @@ export default function OverviewPage() {
   const [selectedRestaurants, setSelectedRestaurants] = useState<string[]>([]);
   const [dateStart, setDateStart] = useState<string>('');
   const [dateEnd, setDateEnd] = useState<string>('');
+  const adminSecret = useAdminSession();
+
+  const handleUploadClick = () => {
+    router.push(adminSecret ? '/admin' : '/admin');
+    // Always go to /admin — if logged in, they see the panel; if not, the login gate
+  };
 
   // Load data
   const loadData = useCallback(async () => {
@@ -202,7 +209,7 @@ export default function OverviewPage() {
 
   const selectedMetricDef = getMetricDefinition(selectedMetric);
 
-  // Empty state
+  // Empty state — shown to visitors when no data has loaded yet
   if (dataLoaded && !hasDataState) {
     return (
       <DashboardShell>
@@ -217,13 +224,12 @@ export default function OverviewPage() {
             Welcome to ZomatoPulse
           </h2>
           <p className="text-center max-w-md mb-8" style={{ color: 'var(--text-muted)' }}>
-            Upload your Zomato business report CSV to get started with analytics.
-            Supports daily and monthly data for 32 restaurants.
+            No data has been loaded yet. If you are the admin, upload a CSV to make data available for all visitors.
           </p>
-          <Link href="/upload" className="btn-primary text-base px-8 py-3">
+          <button onClick={handleUploadClick} className="btn-primary text-base px-8 py-3">
             <Upload size={18} />
-            Upload CSV Data
-          </Link>
+            {adminSecret ? 'Go to Admin Panel' : 'Admin Login'}
+          </button>
         </div>
       </DashboardShell>
     );
@@ -250,10 +256,10 @@ export default function OverviewPage() {
         subtitle={`${restaurants.length} restaurants • ${dateStart && dateEnd ? `${new Date(dateStart).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(dateEnd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}`}
         onMenuClick={() => {}}
         actions={
-          <Link href="/upload" className="btn-secondary text-sm">
+          <button onClick={handleUploadClick} className="btn-secondary text-sm">
             <Upload size={14} />
-            Upload Data
-          </Link>
+            {adminSecret ? 'Admin Panel' : 'Upload Data'}
+          </button>
         }
       />
 

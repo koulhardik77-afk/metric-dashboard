@@ -1,20 +1,37 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAdminSession } from '@/hooks/useAdminSession';
 import DashboardShell from '@/components/layout/DashboardShell';
 import Header from '@/components/layout/Header';
 import CsvUploader from '@/components/upload/CsvUploader';
 import { getUploadHistory, getTotalRecordCount } from '@/lib/db/queries';
 import { clearAllData } from '@/lib/db/database';
 import type { UploadRecord } from '@/types';
-import { FileSpreadsheet, Trash2, Database, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileSpreadsheet, Trash2, Database, Clock, CheckCircle, AlertCircle, ShieldOff } from 'lucide-react';
 
 export default function UploadPage() {
+  const router = useRouter();
+  const adminSecret = useAdminSession();
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Redirect to /admin login if not authenticated
+  useEffect(() => {
+    // adminSecret is null during SSR and then resolves after mount
+    setAuthChecked(true);
+    if (adminSecret === null) {
+      // Give a tick for sessionStorage to resolve before redirecting
+      const t = setTimeout(() => router.replace('/admin'), 50);
+      return () => clearTimeout(t);
+    }
+  }, [adminSecret, router]);
 
   useEffect(() => {
+    if (!adminSecret) return;
     async function load() {
       const [history, count] = await Promise.all([
         getUploadHistory(),
@@ -24,7 +41,7 @@ export default function UploadPage() {
       setTotalRecords(count);
     }
     load();
-  }, [refreshKey]);
+  }, [refreshKey, adminSecret]);
 
   const handleClearData = async () => {
     if (confirm('Are you sure you want to clear all data? This cannot be undone.')) {
@@ -32,6 +49,18 @@ export default function UploadPage() {
       setRefreshKey((k) => k + 1);
     }
   };
+
+  // Show nothing while auth resolves (avoids flash of content)
+  if (!adminSecret) {
+    return (
+      <DashboardShell>
+        <div className="flex flex-col items-center justify-center min-h-[80vh]">
+          <ShieldOff size={32} className="mb-4" style={{ color: 'var(--text-muted)' }} />
+          <p style={{ color: 'var(--text-muted)' }}>Redirecting to admin login...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>
@@ -96,7 +125,7 @@ export default function UploadPage() {
 
       {/* Upload Zone */}
       <div className="mb-8">
-        <CsvUploader onUploadComplete={() => setRefreshKey((k) => k + 1)} />
+        <CsvUploader adminSecret={adminSecret} onUploadComplete={() => setRefreshKey((k) => k + 1)} />
       </div>
 
       {/* Upload Format Guide */}
