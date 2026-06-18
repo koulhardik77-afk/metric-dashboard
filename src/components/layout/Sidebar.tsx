@@ -4,18 +4,17 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
-  Upload,
   GitCompareArrows,
   FileBarChart,
   Store,
   TrendingUp,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
-  { href: '/upload', label: 'Upload Data', icon: Upload },
   { href: '/restaurants', label: 'Restaurants', icon: Store },
   { href: '/compare', label: 'Compare', icon: GitCompareArrows },
   { href: '/reports', label: 'Reports', icon: FileBarChart },
@@ -93,7 +92,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Footer */}
         <div className="p-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-          <div className="glass-card p-4 text-center">
+          <div className="glass-card p-3 text-center mb-2">
             <p className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
               Zomato Data Only
             </p>
@@ -101,6 +100,20 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               32 Restaurants • Internal Use
             </p>
           </div>
+          <Link
+            href="/admin"
+            onClick={onClose}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors w-full',
+              pathname === '/admin'
+                ? 'text-amber-400 bg-amber-400/10'
+                : 'hover:bg-white/5'
+            )}
+            style={{ color: pathname === '/admin' ? undefined : 'var(--text-muted)' }}
+          >
+            <ShieldCheck size={14} />
+            <span>Admin</span>
+          </Link>
         </div>
       </aside>
     </>

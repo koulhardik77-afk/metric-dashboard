@@ -8,14 +8,21 @@ import type { ParseResult } from '@/types';
 
 interface CsvUploaderProps {
   onUploadComplete?: () => void;
+  /**
+   * When provided, the component will also push the CSV to Vercel Blob
+   * using this value as the x-admin-secret header.
+   * When omitted, only local IndexedDB is updated (no cloud upload).
+   */
+  adminSecret?: string;
 }
 
-export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
+export default function CsvUploader({ onUploadComplete, adminSecret }: CsvUploaderProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [savedCount, setSavedCount] = useState(0);
+  const [cloudSynced, setCloudSynced] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(async (file: File) => {
@@ -23,6 +30,7 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
     setProgress(10);
     setResult(null);
     setSavedCount(0);
+    setCloudSynced(null);
 
     try {
       // Step 1: Parse CSV
@@ -36,17 +44,17 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
         return;
       }
 
-      // Step 2: Save restaurants
+      // Step 2: Save restaurants to local IndexedDB
       setProgress(60);
       await upsertRestaurants(parseResult.restaurants);
 
-      // Step 3: Save metric records
+      // Step 3: Save metric records to local IndexedDB
       setProgress(70);
       const count = await upsertMetricRecords(parseResult.records);
       setSavedCount(count);
-      setProgress(90);
+      setProgress(80);
 
-      // Step 4: Log upload
+      // Step 4: Log upload record locally
       await addUploadRecord({
         fileName: file.name,
         uploadedAt: new Date().toISOString(),
@@ -59,16 +67,22 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
         warnings: parseResult.warnings,
       });
 
-      // Step 5: Upload CSV to shared cloud storage (Vercel Blob)
-      // This makes the data available to every visitor who opens the link
-      setProgress(95);
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        await fetch('/api/upload-csv', { method: 'POST', body: formData });
-      } catch {
-        // Shared upload is best-effort — local data is already saved
-        console.warn('Could not upload to shared storage (Vercel Blob not configured)');
+      // Step 5: Push to Vercel Blob only when an admin secret is provided
+      setProgress(90);
+      if (adminSecret) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const res = await fetch('/api/upload-csv', {
+            method: 'POST',
+            headers: { 'x-admin-secret': adminSecret },
+            body: formData,
+          });
+          setCloudSynced(res.ok);
+        } catch {
+          setCloudSynced(false);
+          console.warn('Cloud upload failed');
+        }
       }
 
       setProgress(100);
@@ -90,7 +104,7 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
     } finally {
       setIsProcessing(false);
     }
-  }, [onUploadComplete]);
+  }, [onUploadComplete, adminSecret]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -138,7 +152,7 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
                 {progress < 30 ? 'Parsing CSV...' :
                  progress < 60 ? 'Validating metrics...' :
                  progress < 80 ? 'Saving records...' :
-                 progress < 100 ? 'Finalizing...' : 'Complete!'}
+                 progress < 95 ? 'Syncing to cloud...' : 'Complete!'}
               </p>
             </div>
           </div>
@@ -182,7 +196,11 @@ export default function CsvUploader({ onUploadComplete }: CsvUploaderProps) {
                     Upload Successful
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    Data has been processed and is ready for analysis
+                    {adminSecret
+                      ? cloudSynced
+                        ? 'Data saved locally and synced to cloud — all visitors will see this data.'
+                        : 'Data saved locally. Cloud sync failed — check your connection.'
+                      : 'Data has been processed and is ready for analysis.'}
                   </p>
                 </div>
               </div>
