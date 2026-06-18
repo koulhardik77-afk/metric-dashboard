@@ -29,43 +29,60 @@ export async function ensureSeedData(): Promise<boolean> {
   console.log('[SeedData] No data found. Fetching shared data from cloud...');
 
   try {
-    // Fetch the CSV via our server-side proxy — avoids CORS restrictions
-    // that would block a direct browser fetch to blob.vercel-storage.com
+    // Fetch all CSVs via our server-side proxy (avoids CORS + private blob auth)
     const csvResponse = await fetch('/api/csv-data');
     if (!csvResponse.ok) {
-      if (csvResponse.status === 404) {
-        console.log('[SeedData] No shared data available yet');
-      } else {
-        console.warn('[SeedData] Could not download shared CSV:', csvResponse.status);
-      }
+      console.warn('[SeedData] Could not download shared CSVs:', csvResponse.status);
       return false;
     }
 
-    const csvText = await csvResponse.text();
-    const { restaurants, records, dateRange, granularity } = parseCsvText(csvText);
+    const { csvTexts, count: csvCount } = await csvResponse.json() as { csvTexts: string[]; count: number };
 
-    if (restaurants.length === 0 || records.length === 0) {
-      console.warn('[SeedData] Shared CSV contained no valid data');
+    if (!csvTexts || csvCount === 0) {
+      console.log('[SeedData] No shared data available yet');
       return false;
     }
 
-    // Import into local IndexedDB
-    await upsertRestaurants(restaurants);
-    const importedCount = await upsertMetricRecords(records);
+    console.log(`[SeedData] Found ${csvCount} CSV file(s). Importing...`);
+
+    let totalRestaurants = new Map<string, import('@/types').Restaurant>();
+    let totalImported = 0;
+    let overallDateStart = '';
+    let overallDateEnd = '';
+
+    // Parse and upsert each CSV (oldest first — already sorted by the API)
+    for (const csvText of csvTexts) {
+      const { restaurants, records, dateRange } = parseCsvText(csvText);
+      if (restaurants.length === 0 || records.length === 0) continue;
+
+      restaurants.forEach((r) => totalRestaurants.set(r.id, r));
+
+      await upsertRestaurants(restaurants);
+      const imported = await upsertMetricRecords(records);
+      totalImported += imported;
+
+      if (!overallDateStart || dateRange.start < overallDateStart) overallDateStart = dateRange.start;
+      if (!overallDateEnd || dateRange.end > overallDateEnd) overallDateEnd = dateRange.end;
+    }
+
+    if (totalImported === 0) {
+      console.warn('[SeedData] Shared CSVs contained no valid data');
+      return false;
+    }
 
     await addUploadRecord({
-      fileName: '[shared] cloud data',
+      fileName: `[shared] ${csvCount} cloud file(s)`,
       uploadedAt: new Date().toISOString(),
-      dateRangeStart: dateRange.start,
-      dateRangeEnd: dateRange.end,
-      restaurantCount: restaurants.length,
-      recordCount: importedCount,
+      dateRangeStart: overallDateStart,
+      dateRangeEnd: overallDateEnd,
+      restaurantCount: totalRestaurants.size,
+      recordCount: totalImported,
       status: 'success',
       errors: [],
       warnings: ['Auto-imported from shared cloud storage'],
     });
 
-    console.log(`[SeedData] Imported shared data: ${restaurants.length} restaurants, ${importedCount} records`);
+    console.log(`[SeedData] Done: ${totalRestaurants.size} restaurants, ${totalImported} records across ${csvCount} file(s)`);
     return true;
   } catch (err) {
     console.error('[SeedData] Error fetching shared data:', err);

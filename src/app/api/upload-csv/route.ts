@@ -2,6 +2,10 @@
 // API Route: Upload / Delete CSV in Vercel Blob Storage
 // Protected by x-admin-secret header
 // ============================================================
+// Each upload APPENDS a new blob — old ones are kept so the
+// dashboard can accumulate data over time. Deduplication of
+// records is handled client-side by the upsert logic.
+// ============================================================
 
 import { put, del, list } from '@vercel/blob';
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,7 +20,7 @@ function isAuthorized(request: NextRequest): boolean {
   return secret === expected;
 }
 
-// POST: Upload a new CSV (replaces existing)
+// POST: Append a new CSV to blob storage (keeps all previous uploads)
 export async function POST(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -30,17 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    // Delete any previously uploaded CSVs to keep storage clean
-    try {
-      const existing = await list({ prefix: 'dashboard-data/' });
-      for (const blob of existing.blobs) {
-        await del(blob.url);
-      }
-    } catch {
-      // Ignore errors when listing/deleting old blobs
-    }
-
-    // Upload the new CSV with a timestamped name
+    // Upload with a timestamped name — old files are intentionally kept
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const blob = await put(`dashboard-data/${timestamp}.csv`, file, {
       access: 'private',
@@ -62,22 +56,33 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE: Clear all shared CSV data from Blob
+// DELETE all: Clear every CSV from blob storage
 export async function DELETE(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Optional: delete a single blob by passing ?url=<blobUrl>
+  const { searchParams } = new URL(request.url);
+  const singleUrl = searchParams.get('url');
+
   try {
+    if (singleUrl) {
+      await del(singleUrl);
+      return NextResponse.json({ success: true, deleted: 1 });
+    }
+
+    // No URL param → delete all
     const existing = await list({ prefix: 'dashboard-data/' });
     for (const blob of existing.blobs) {
       await del(blob.url);
     }
     return NextResponse.json({ success: true, deleted: existing.blobs.length });
   } catch (error) {
-    console.error('Failed to clear blobs:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Failed to delete blob(s):', message);
     return NextResponse.json(
-      { error: 'Failed to clear shared data' },
+      { error: 'Failed to delete', detail: message },
       { status: 500 }
     );
   }

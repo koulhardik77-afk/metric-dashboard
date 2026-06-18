@@ -27,6 +27,7 @@ interface BlobInfo {
   url: string;
   uploadedAt: string;
   size: number;
+  pathname: string;
 }
 
 // ─── Login Gate ─────────────────────────────────────────────
@@ -139,14 +140,14 @@ interface StatusInfo {
 }
 
 function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void }) {
-  const [blobInfo, setBlobInfo] = useState<BlobInfo | null>(null);
+  const [blobs, setBlobs] = useState<BlobInfo[]>([]);
   const [blobLoading, setBlobLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
+  const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
   const [clearResult, setClearResult] = useState<'success' | 'error' | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [status, setStatus] = useState<StatusInfo | null>(null);
 
-  // Run health-check on mount and after each refresh
   useEffect(() => {
     fetch('/api/admin/status')
       .then((r) => r.json())
@@ -159,13 +160,9 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
     try {
       const res = await fetch('/api/latest-data');
       const data = await res.json();
-      if (data.url) {
-        setBlobInfo({ url: data.url, uploadedAt: data.uploadedAt, size: data.size });
-      } else {
-        setBlobInfo(null);
-      }
+      setBlobs(data.blobs ?? []);
     } catch {
-      setBlobInfo(null);
+      setBlobs([]);
     } finally {
       setBlobLoading(false);
     }
@@ -175,8 +172,22 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
     fetchBlobInfo();
   }, [fetchBlobInfo, refreshKey]);
 
-  const handleClearCloud = async () => {
-    if (!confirm('This will delete the shared CSV from cloud storage. All existing visitors will keep their cached data, but new visitors will see an empty dashboard. Continue?')) return;
+  const handleDeleteOne = async (url: string) => {
+    if (!confirm('Delete this file? Visitors who have already synced this data will keep it locally, but new visitors won\'t get this data.')) return;
+    setDeletingUrl(url);
+    try {
+      const res = await fetch(`/api/upload-csv?url=${encodeURIComponent(url)}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-secret': secret },
+      });
+      if (res.ok) setRefreshKey((k) => k + 1);
+    } finally {
+      setDeletingUrl(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('Delete ALL shared CSV files? New visitors will see an empty dashboard until you upload new data. Continue?')) return;
     setClearing(true);
     setClearResult(null);
     try {
@@ -198,6 +209,8 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
+
+  const totalSize = blobs.reduce((s, b) => s + b.size, 0);
 
   return (
     <>
@@ -224,13 +237,11 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
             <p className="text-sm font-semibold mb-1" style={{ color: 'var(--danger)' }}>
               Blob storage is not configured — uploads will fail
             </p>
-            <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-              {status.error}
-            </p>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>{status.error}</p>
             <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-              Fix: Go to your Vercel project → <strong>Settings → Environment Variables</strong> and add{' '}
-              <code className="px-1 py-0.5 rounded text-xs" style={{ background: 'rgba(0,0,0,0.3)' }}>BLOB_READ_WRITE_TOKEN</code>{' '}
-              with your Vercel Blob token, then redeploy.
+              Fix: Vercel Dashboard → <strong>Settings → Environment Variables</strong> → add{' '}
+              <code className="px-1 py-0.5 rounded text-xs" style={{ background: 'rgba(0,0,0,0.3)' }}>BLOB_READ_WRITE_TOKEN</code>
+              , then redeploy.
             </p>
           </div>
         </div>
@@ -238,7 +249,6 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
 
       {/* Status Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 animate-fade-in" style={{ opacity: 0 }}>
-        {/* Auth status */}
         <div className="kpi-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg" style={{ background: 'rgba(251,191,36,0.1)' }}>
@@ -251,10 +261,9 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
           </div>
         </div>
 
-        {/* Blob connection status */}
         <div className="kpi-card">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg" style={{ background: status?.blobConnected ? 'var(--success-bg)' : blobInfo ? 'rgba(6,182,212,0.1)' : 'var(--danger-bg)' }}>
+            <div className="p-2 rounded-lg" style={{ background: status?.blobConnected ? 'var(--success-bg)' : 'var(--danger-bg)' }}>
               {blobLoading
                 ? <RefreshCw size={18} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
                 : status?.blobConnected
@@ -265,135 +274,150 @@ function AdminPanel({ secret, onLogout }: { secret: string; onLogout: () => void
             <div>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Cloud Storage</p>
               <p className="text-sm font-bold" style={{ color: status?.blobConnected ? 'var(--success)' : 'var(--danger)' }}>
-                {blobLoading ? 'Checking...' : status?.blobConnected ? (blobInfo ? 'Live data' : 'Connected') : 'Not configured'}
+                {blobLoading ? 'Checking...' : status?.blobConnected ? 'Connected' : 'Not configured'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* File size */}
         <div className="kpi-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg" style={{ background: 'rgba(139,92,246,0.1)' }}>
               <Database size={18} style={{ color: '#8b5cf6' }} />
             </div>
             <div>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>File Size</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {blobs.length} file{blobs.length !== 1 ? 's' : ''} stored
+              </p>
               <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                {blobLoading ? '—' : blobInfo ? formatBytes(blobInfo.size) : '—'}
+                {blobLoading ? '—' : blobs.length > 0 ? formatBytes(totalSize) : '0 B'}
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Current Shared Data Info */}
-      {blobInfo && (
-        <div
-          className="glass-card p-5 mb-8 animate-fade-in"
-          style={{ opacity: 0, animationDelay: '0.05s', border: '1px solid rgba(6,182,212,0.2)' }}
-        >
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg" style={{ background: 'var(--success-bg)' }}>
-                <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
-              </div>
-              <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  Shared CSV is live
-                </p>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    <Clock size={10} />
-                    Uploaded {new Date(blobInfo.uploadedAt).toLocaleString('en-IN')}
-                  </span>
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {formatBytes(blobInfo.size)}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href={blobInfo.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary text-xs"
-              >
-                <FileSpreadsheet size={12} />
-                View File
-              </a>
-              <button
-                onClick={handleClearCloud}
-                disabled={clearing}
-                className="btn-secondary text-xs"
-                style={{ color: 'var(--danger)', opacity: clearing ? 0.6 : 1 }}
-              >
-                {clearing
-                  ? <RefreshCw size={12} className="animate-spin" />
-                  : <Trash2 size={12} />}
-                Clear Cloud Data
-              </button>
-            </div>
-          </div>
-
-          {clearResult === 'success' && (
-            <div className="mt-3 p-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--success-bg)' }}>
-              <CheckCircle2 size={12} style={{ color: 'var(--success)' }} />
-              <p className="text-xs" style={{ color: 'var(--success)' }}>Cloud data cleared successfully.</p>
-            </div>
-          )}
-          {clearResult === 'error' && (
-            <div className="mt-3 p-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--danger-bg)' }}>
-              <AlertCircle size={12} style={{ color: 'var(--danger)' }} />
-              <p className="text-xs" style={{ color: 'var(--danger)' }}>Failed to clear. Check your connection or secret.</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Upload Section */}
-      <div className="glass-card p-6 mb-8 animate-fade-in" style={{ opacity: 0, animationDelay: '0.1s' }}>
+      <div className="glass-card p-6 mb-8 animate-fade-in" style={{ opacity: 0, animationDelay: '0.05s' }}>
         <div className="mb-5">
           <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
             Upload New Data
           </h3>
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            Uploading a CSV will replace the current shared data for all future visitors. Existing visitors will see the new data on their next visit.
+            Each upload is stored separately. All files are merged when visitors load the dashboard — records for the same restaurant and date are automatically deduplicated.
           </p>
         </div>
         <CsvUploader
           adminSecret={secret}
-          onUploadComplete={() => {
-            setRefreshKey((k) => k + 1);
-          }}
+          onUploadComplete={() => setRefreshKey((k) => k + 1)}
         />
       </div>
 
-      {/* No cloud data notice */}
-      {!blobLoading && !blobInfo && status?.blobConnected && (
-        <div
-          className="glass-card p-5 text-center animate-fade-in"
-          style={{ opacity: 0, animationDelay: '0.15s', border: '1px solid rgba(245,158,11,0.2)' }}
-        >
-          <CloudOff size={32} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-          <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>No shared data in cloud yet</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-            Upload a CSV above to make data available to all visitors.
-          </p>
+      {/* Stored Files Table */}
+      <div className="glass-card overflow-hidden mb-8 animate-fade-in" style={{ opacity: 0, animationDelay: '0.1s' }}>
+        <div className="p-5 flex items-center justify-between flex-wrap gap-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Stored CSV Files
+            </h3>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {blobLoading ? 'Loading...' : blobs.length === 0 ? 'No files uploaded yet' : `${blobs.length} file(s) • ${formatBytes(totalSize)} total`}
+            </p>
+          </div>
+          {blobs.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              disabled={clearing}
+              className="btn-secondary text-xs"
+              style={{ color: 'var(--danger)', opacity: clearing ? 0.6 : 1 }}
+            >
+              {clearing ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+              Clear All
+            </button>
+          )}
         </div>
-      )}
+
+        {blobs.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>File</th>
+                  <th>Uploaded</th>
+                  <th style={{ textAlign: 'right' }}>Size</th>
+                  <th style={{ textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blobs.map((blob, i) => (
+                  <tr key={blob.url}>
+                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>{blobs.length - i}</td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet size={14} style={{ color: 'var(--accent-primary)' }} />
+                        <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
+                          {blob.pathname.replace('dashboard-data/', '')}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        <Clock size={10} />
+                        {new Date(blob.uploadedAt).toLocaleString('en-IN')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBytes(blob.size)}</span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        onClick={() => handleDeleteOne(blob.url)}
+                        disabled={deletingUrl === blob.url}
+                        className="btn-secondary text-xs"
+                        style={{ color: 'var(--danger)', opacity: deletingUrl === blob.url ? 0.6 : 1 }}
+                      >
+                        {deletingUrl === blob.url
+                          ? <RefreshCw size={10} className="animate-spin" />
+                          : <Trash2 size={10} />}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : !blobLoading && (
+          <div className="p-8 text-center">
+            <CloudOff size={28} className="mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No files uploaded yet. Use the uploader above.</p>
+          </div>
+        )}
+
+        {clearResult === 'success' && (
+          <div className="p-3 flex items-center gap-2" style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--success-bg)' }}>
+            <CheckCircle2 size={12} style={{ color: 'var(--success)' }} />
+            <p className="text-xs" style={{ color: 'var(--success)' }}>All cloud data cleared successfully.</p>
+          </div>
+        )}
+        {clearResult === 'error' && (
+          <div className="p-3 flex items-center gap-2" style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--danger-bg)' }}>
+            <AlertCircle size={12} style={{ color: 'var(--danger)' }} />
+            <p className="text-xs" style={{ color: 'var(--danger)' }}>Failed to clear. Check your connection.</p>
+          </div>
+        )}
+      </div>
 
       {/* How it works */}
-      <div className="glass-card p-6 animate-fade-in" style={{ opacity: 0, animationDelay: '0.2s' }}>
+      <div className="glass-card p-6 animate-fade-in" style={{ opacity: 0, animationDelay: '0.15s' }}>
         <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
           How it works
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { step: '1', title: 'Admin uploads CSV', desc: 'You upload the Zomato business report here. It\'s saved to Vercel Blob cloud storage.' },
-            { step: '2', title: 'Data is shared', desc: 'The CSV is stored publicly (but unlisted) in the cloud, replacing any previous version.' },
-            { step: '3', title: 'Visitors auto-sync', desc: 'On their first visit, the dashboard automatically fetches and imports the shared CSV into their browser.' },
+            { step: '1', title: 'Admin uploads CSVs', desc: 'Each upload is stored as a separate file in Vercel Blob — nothing is overwritten.' },
+            { step: '2', title: 'All data is merged', desc: 'Visitors receive all files and they\'re merged client-side. Duplicate records (same restaurant + date) are deduplicated automatically.' },
+            { step: '3', title: 'Historical insights', desc: 'Because all uploads accumulate, trends and cumulative metrics grow over time as you upload new reports.' },
           ].map(({ step, title, desc }) => (
             <div key={step} className="flex gap-3">
               <div

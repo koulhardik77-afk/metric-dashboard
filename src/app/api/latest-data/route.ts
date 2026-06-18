@@ -1,8 +1,9 @@
 // ============================================================
-// API Route: Get Latest Shared CSV from Vercel Blob
+// API Route: List all shared CSVs stored in Vercel Blob
+// GET /api/latest-data
 // ============================================================
-// Returns the URL of the most recently uploaded CSV so any
-// visitor can fetch and import the shared data.
+// Returns all blobs under dashboard-data/, sorted newest first.
+// Used by the admin panel to display upload history.
 // ============================================================
 
 import { list } from '@vercel/blob';
@@ -12,24 +13,20 @@ export async function GET() {
   try {
     const result = await list({ prefix: 'dashboard-data/' });
 
-    if (result.blobs.length === 0) {
-      return NextResponse.json({ url: null, message: 'No shared data available' });
-    }
+    const blobs = result.blobs
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+      .map((b) => ({
+        url: b.url,
+        uploadedAt: b.uploadedAt,
+        size: b.size,
+        pathname: b.pathname,
+      }));
 
-    // Get the most recent blob (sorted by upload date)
-    const latest = result.blobs.sort(
-      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-    )[0];
-
-    return NextResponse.json({
-      url: latest.url,
-      uploadedAt: latest.uploadedAt,
-      size: latest.size,
-    });
+    return NextResponse.json({ blobs, count: blobs.length });
   } catch (error) {
     console.error('Failed to list blobs:', error);
     return NextResponse.json(
-      { url: null, error: 'Failed to fetch shared data info' },
+      { blobs: [], count: 0, error: 'Failed to fetch shared data info' },
       { status: 500 }
     );
   }
