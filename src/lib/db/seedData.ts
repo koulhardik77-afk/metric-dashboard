@@ -15,8 +15,8 @@ import { parseNumericValue } from '@/lib/utils/format';
 import { db, upsertMetricRecords, upsertRestaurants, addUploadRecord } from './database';
 
 // The CSV files placed in /public during build
-const SEED_CSV_FILES = [
-  '/seed-data.csv',
+const SEED_CSV_FILES: string[] = [
+  // Add seed CSV paths here after uploading new data
 ];
 
 /**
