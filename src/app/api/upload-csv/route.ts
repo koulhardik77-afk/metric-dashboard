@@ -31,20 +31,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Delete any previously uploaded CSVs to keep storage clean
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
     try {
-      const existing = await list({ prefix: 'dashboard-data/' });
+      const existing = await list({ prefix: 'dashboard-data/', token });
       for (const blob of existing.blobs) {
-        await del(blob.url);
+        await del(blob.url, { token });
       }
     } catch {
       // Ignore errors when listing/deleting old blobs
     }
 
     // Upload the new CSV with a timestamped name
+    // Note: do NOT pass `access` — the store's own configuration determines it.
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const blob = await put(`dashboard-data/${timestamp}.csv`, file, {
-      access: 'public',
       contentType: 'text/csv',
+      token,
     });
 
     return NextResponse.json({
@@ -68,9 +70,10 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const existing = await list({ prefix: 'dashboard-data/' });
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const existing = await list({ prefix: 'dashboard-data/', token });
     for (const blob of existing.blobs) {
-      await del(blob.url);
+      await del(blob.url, { token });
     }
     return NextResponse.json({ success: true, deleted: existing.blobs.length });
   } catch (error) {

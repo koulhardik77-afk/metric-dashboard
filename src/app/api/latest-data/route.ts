@@ -10,7 +10,8 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const result = await list({ prefix: 'dashboard-data/' });
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const result = await list({ prefix: 'dashboard-data/', token });
 
     if (result.blobs.length === 0) {
       return NextResponse.json({ url: null, message: 'No shared data available' });
