@@ -15,11 +15,38 @@ import { parseNumericValue } from '@/lib/utils/format';
 import { db, upsertMetricRecords, upsertRestaurants, addUploadRecord } from './database';
 
 /**
+ * Dates that should never appear in the dashboard.
+ * Any metric records stored for these ISO dates will be deleted
+ * automatically on every page load (purgeBlacklistedDates).
+ */
+const BLACKLISTED_DATES: string[] = [
+  '2026-06-21', // Sunday — data for this day should not be shown
+];
+
+/**
+ * Delete all IndexedDB metric records whose date is in BLACKLISTED_DATES.
+ * Safe to call on every page load — no-op if records are already absent.
+ */
+export async function purgeBlacklistedDates(): Promise<void> {
+  for (const date of BLACKLISTED_DATES) {
+    const records = await db.metricRecords.where('date').equals(date).toArray();
+    if (records.length > 0) {
+      const ids = records.map((r) => r.id!).filter(Boolean);
+      await db.metricRecords.bulkDelete(ids);
+      console.log(`[SeedData] Purged ${ids.length} records for blacklisted date: ${date}`);
+    }
+  }
+}
+
+/**
  * Check if the database is empty and, if so, fetch shared data
  * from Vercel Blob Storage. Safe to call on every page load —
  * it's a no-op if data already exists.
  */
 export async function ensureSeedData(): Promise<boolean> {
+  // Always purge blacklisted dates regardless of whether we seed
+  await purgeBlacklistedDates();
+
   const count = await db.metricRecords.count();
   if (count > 0) {
     // Data already exists — skip seeding

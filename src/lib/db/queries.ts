@@ -84,3 +84,20 @@ export async function hasData(): Promise<boolean> {
   const count = await db.metricRecords.count();
   return count > 0;
 }
+
+/**
+ * Delete ALL metric records for a specific date (ISO format: YYYY-MM-DD).
+ * Useful to remove a day that was uploaded by mistake.
+ */
+export async function deleteRecordsByDate(date: string): Promise<number> {
+  const records = await db.metricRecords
+    .where('date')
+    .equals(date)
+    .toArray();
+
+  const ids = records.map((r) => r.id!).filter(Boolean);
+  if (ids.length === 0) return 0;
+
+  await db.metricRecords.bulkDelete(ids);
+  return ids.length;
+}
